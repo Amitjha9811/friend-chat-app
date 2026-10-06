@@ -21,7 +21,7 @@ export default function Chat({ user }) {
       .eq("user_id", user.id);
 
     if (error) {
-      console.error(error);
+      console.error("Groups error:", error);
       return;
     }
 
@@ -35,14 +35,12 @@ export default function Chat({ user }) {
   async function loadMessages(id) {
     const { data, error } = await s
       .from("messages")
-      .select(
-        "id,user_id,content,created_at,profiles(username)"
-      )
+      .select("id,user_id,content,created_at")
       .eq("group_id", id)
-      .order("created_at");
+      .order("created_at", { ascending: true });
 
     if (error) {
-      console.error(error);
+      console.error("Messages error:", error);
       return;
     }
 
@@ -58,7 +56,7 @@ export default function Chat({ user }) {
 
     loadMessages(active.id);
 
-    const ch = s
+    const channel = s
       .channel("messages-" + active.id)
       .on(
         "postgres_changes",
@@ -75,7 +73,7 @@ export default function Chat({ user }) {
       .subscribe();
 
     return () => {
-      s.removeChannel(ch);
+      s.removeChannel(channel);
     };
   }, [active]);
 
@@ -84,18 +82,22 @@ export default function Chat({ user }) {
 
     if (!text.trim() || !active) return;
 
+    const messageText = text.trim();
+
     const { error } = await s.from("messages").insert({
       group_id: active.id,
       user_id: user.id,
-      content: text.trim(),
+      content: messageText,
     });
 
     if (error) {
-      alert(error.message);
+      alert("Message error: " + error.message);
+      console.error(error);
       return;
     }
 
     setText("");
+    await loadMessages(active.id);
   }
 
   async function create(e) {
@@ -108,7 +110,8 @@ export default function Chat({ user }) {
     });
 
     if (error) {
-      alert(error.message);
+      alert("Create group error: " + error.message);
+      console.error(error);
       return;
     }
 
@@ -126,7 +129,8 @@ export default function Chat({ user }) {
     });
 
     if (error) {
-      alert(error.message);
+      alert("Join group error: " + error.message);
+      console.error(error);
       return;
     }
 
@@ -153,9 +157,9 @@ export default function Chat({ user }) {
       </div>
 
       <div className="chat-layout">
+
         <aside className="card sidebar">
 
-          {/* CREATE GROUP */}
           <form onSubmit={create}>
             <input
               placeholder="New group name"
@@ -168,8 +172,10 @@ export default function Chat({ user }) {
             </button>
           </form>
 
-          {/* JOIN GROUP */}
-          <form onSubmit={joinGroup} style={{ marginTop: "12px" }}>
+          <form
+            onSubmit={joinGroup}
+            style={{ marginTop: "12px" }}
+          >
             <input
               placeholder="Enter invite code"
               value={inviteCode}
@@ -201,12 +207,15 @@ export default function Chat({ user }) {
               </div>
             ))
           )}
+
         </aside>
 
         <section className="card">
+
           {!active ? (
             <>
               <h2>Welcome 👋</h2>
+
               <p>
                 Create a group or join one using an invite code.
               </p>
@@ -224,21 +233,32 @@ export default function Chat({ user }) {
               </div>
 
               <div className="messages">
-                {messages.map((m) => (
-                  <div className="message" key={m.id}>
-                    <b>
-                      {m.profiles?.username || "User"}
-                    </b>
 
-                    <div>{m.content}</div>
+                {messages.length === 0 ? (
+                  <p className="small">
+                    No messages yet. Start the conversation!
+                  </p>
+                ) : (
+                  messages.map((m) => (
+                    <div
+                      className="message"
+                      key={m.id}
+                    >
+                      <b>User</b>
 
-                    <span className="small">
-                      {new Date(
-                        m.created_at
-                      ).toLocaleString()}
-                    </span>
-                  </div>
-                ))}
+                      <div>
+                        {m.content}
+                      </div>
+
+                      <span className="small">
+                        {new Date(
+                          m.created_at
+                        ).toLocaleString()}
+                      </span>
+                    </div>
+                  ))
+                )}
+
               </div>
 
               <form
@@ -257,9 +277,12 @@ export default function Chat({ user }) {
                   Send
                 </button>
               </form>
+
             </>
           )}
+
         </section>
+
       </div>
     </main>
   );
