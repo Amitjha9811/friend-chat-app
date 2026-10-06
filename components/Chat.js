@@ -10,16 +10,18 @@ export default function Chat({ user }) {
   const [active, setActive] = useState(null);
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
+
   const [newGroup, setNewGroup] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
 
   async function loadGroups() {
     const { data, error } = await s
       .from("group_members")
-      .select("group_id, groups(id, name, invite_code)")
+      .select("group_id,groups(id,name,invite_code)")
       .eq("user_id", user.id);
 
     if (error) {
-      console.error("Load groups error:", error);
+      console.error(error);
       return;
     }
 
@@ -31,19 +33,16 @@ export default function Chat({ user }) {
   }
 
   async function loadMessages(id) {
-    if (!id) {
-      setMessages([]);
-      return;
-    }
-
     const { data, error } = await s
       .from("messages")
-      .select("id, user_id, content, created_at")
+      .select(
+        "id,user_id,content,created_at,profiles(username)"
+      )
       .eq("group_id", id)
-      .order("created_at", { ascending: true });
+      .order("created_at");
 
     if (error) {
-      console.error("Load messages error:", error);
+      console.error(error);
       return;
     }
 
@@ -55,73 +54,48 @@ export default function Chat({ user }) {
   }, []);
 
   useEffect(() => {
-    if (!active) {
-      setMessages([]);
-      return;
-    }
+    if (!active) return;
 
     loadMessages(active.id);
 
-    const channel = s
-      .channel(`messages-${active.id}`)
+    const ch = s
+      .channel("messages-" + active.id)
       .on(
         "postgres_changes",
         {
           event: "INSERT",
           schema: "public",
           table: "messages",
-          filter: `group_id=eq.${active.id}`,
+          filter: "group_id=eq." + active.id,
         },
-        (payload) => {
-          setMessages((current) => {
-            if (current.some((m) => m.id === payload.new.id)) {
-              return current;
-            }
-
-            return [...current, payload.new];
-          });
+        () => {
+          loadMessages(active.id);
         }
       )
       .subscribe();
 
     return () => {
-      s.removeChannel(channel);
+      s.removeChannel(ch);
     };
-  }, [active?.id]);
+  }, [active]);
 
   async function send(e) {
     e.preventDefault();
 
     if (!text.trim() || !active) return;
 
-    const message = text.trim();
-    setText("");
-
-    const { data, error } = await s
-      .from("messages")
-      .insert({
-        group_id: active.id,
-        user_id: user.id,
-        content: message,
-      })
-      .select("id, user_id, content, created_at")
-      .single();
+    const { error } = await s.from("messages").insert({
+      group_id: active.id,
+      user_id: user.id,
+      content: text.trim(),
+    });
 
     if (error) {
-      console.error("Send message error:", error);
-      setText(message);
+      alert(error.message);
       return;
     }
 
-    if (data) {
-      setMessages((current) => {
-        if (current.some((m) => m.id === data.id)) {
-          return current;
-        }
-
-        return [...current, data];
-      });
-    }
+    setText("");
   }
 
   async function create(e) {
@@ -129,7 +103,7 @@ export default function Chat({ user }) {
 
     if (!newGroup.trim()) return;
 
-    const { data, error } = await s.rpc("create_chat_group", {
+    const { error } = await s.rpc("create_chat_group", {
       group_name: newGroup.trim(),
     });
 
@@ -140,18 +114,26 @@ export default function Chat({ user }) {
 
     setNewGroup("");
     await loadGroups();
+  }
 
-    if (data) {
-      const { data: createdGroup } = await s
-        .from("groups")
-        .select("id, name, invite_code")
-        .eq("id", data)
-        .single();
+  async function joinGroup(e) {
+    e.preventDefault();
 
-      if (createdGroup) {
-        setActive(createdGroup);
-      }
+    if (!inviteCode.trim()) return;
+
+    const { error } = await s.rpc("join_chat_group", {
+      group_invite_code: inviteCode.trim(),
+    });
+
+    if (error) {
+      alert(error.message);
+      return;
     }
+
+    setInviteCode("");
+    await loadGroups();
+
+    alert("Group joined successfully!");
   }
 
   async function logout() {
@@ -172,74 +154,108 @@ export default function Chat({ user }) {
 
       <div className="chat-layout">
         <aside className="card sidebar">
-          <h3>FRIENDS</h3>
 
+          {/* CREATE GROUP */}
           <form onSubmit={create}>
             <input
               placeholder="New group name"
               value={newGroup}
               onChange={(e) => setNewGroup(e.target.value)}
             />
-            <button type="submit">+ Create Group</button>
+
+            <button type="submit">
+              Create Group
+            </button>
+          </form>
+
+          {/* JOIN GROUP */}
+          <form onSubmit={joinGroup} style={{ marginTop: "12px" }}>
+            <input
+              placeholder="Enter invite code"
+              value={inviteCode}
+              onChange={(e) => setInviteCode(e.target.value)}
+            />
+
+            <button type="submit">
+              Join Group
+            </button>
           </form>
 
           <h3>Your Groups</h3>
 
-          {groups.map((g) => (
-            <div
-              key={g.id}
-              className={active?.id === g.id ? "group active" : "group"}
-              onClick={() => setActive(g)}
-            >
-              {g.name}
-            </div>
-          ))}
+          {groups.length === 0 ? (
+            <p className="small">
+              No groups yet.
+            </p>
+          ) : (
+            groups.map((g) => (
+              <div
+                className={
+                  "group " +
+                  (active?.id === g.id ? "active" : "")
+                }
+                key={g.id}
+                onClick={() => setActive(g)}
+              >
+                {g.name}
+              </div>
+            ))
+          )}
         </aside>
 
         <section className="card">
           {!active ? (
             <>
-              <div className="topbar">
-                <h2>Welcome 👋</h2>
-              </div>
-
-              <p>Select or create a group.</p>
+              <h2>Welcome 👋</h2>
+              <p>
+                Create a group or join one using an invite code.
+              </p>
             </>
           ) : (
             <>
               <div className="topbar">
-                <h2>{active.name}</h2>
-                <span className="small">
-                  Invite: {active.invite_code}
-                </span>
+                <div>
+                  <h2>{active.name}</h2>
+
+                  <span className="small">
+                    Invite Code: <b>{active.invite_code}</b>
+                  </span>
+                </div>
               </div>
 
               <div className="messages">
                 {messages.map((m) => (
                   <div className="message" key={m.id}>
-                    <span className="small">
-                      {m.user_id === user.id ? "You" : "User"}
-                    </span>
+                    <b>
+                      {m.profiles?.username || "User"}
+                    </b>
 
                     <div>{m.content}</div>
 
                     <span className="small">
-                      {m.created_at
-                        ? new Date(m.created_at).toLocaleString()
-                        : ""}
+                      {new Date(
+                        m.created_at
+                      ).toLocaleString()}
                     </span>
                   </div>
                 ))}
               </div>
 
-              <form className="composer" onSubmit={send}>
+              <form
+                className="composer"
+                onSubmit={send}
+              >
                 <input
                   placeholder="Write a message..."
                   value={text}
-                  onChange={(e) => setText(e.target.value)}
+                  onChange={(e) =>
+                    setText(e.target.value)
+                  }
                 />
 
-                <button type="submit">Send</button>
+                <button type="submit">
+                  Send
+                </button>
               </form>
             </>
           )}
