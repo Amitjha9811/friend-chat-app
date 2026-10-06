@@ -1,0 +1,6 @@
+ "use client";
+import {useState} from "react";
+import {createClient} from "@/lib/supabase/client";
+export default function Auth(){const s=createClient();const[signup,setSignup]=useState(false),[email,setEmail]=useState(""),[password,setPassword]=useState(""),[name,setName]=useState(""),[msg,setMsg]=useState("");
+async function submit(e){e.preventDefault();setMsg("");let r=signup?await s.auth.signUp({email,password,options:{data:{username:name}}}):await s.auth.signInWithPassword({email,password});if(r.error)setMsg(r.error.message);else location.reload()}
+return <main className="auth"><section className="card auth-card"><h1>💬 FriendChat</h1><p className="small">Private realtime chat for friends.</p><form onSubmit={submit}>{signup&&<input placeholder="Username" value={name} onChange={e=>setName(e.target.value)} required/>}<input type="email" placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)} required/><input type="password" placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)} minLength="6" required/>{msg&&<p>{msg}</p>}<button>{signup?"Create account":"Login"}</button></form><br/><button onClick={()=>setSignup(!signup)}>{signup?"Login":"Create account"}</button></section></main>}
