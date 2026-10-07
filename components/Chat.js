@@ -19,6 +19,9 @@ export default function Chat({ user }) {
 
   const [profiles, setProfiles] = useState({});
 
+  const [notificationPermission, setNotificationPermission] =
+    useState("default");
+
   // -----------------------------
   // LOAD USERNAME
   // -----------------------------
@@ -39,6 +42,39 @@ export default function Chat({ user }) {
       setNameInput(data.username);
     }
   }
+
+  // -----------------------------
+  // ENABLE NOTIFICATIONS
+  // -----------------------------
+  async function enableNotifications() {
+    if (!("Notification" in window)) {
+      alert("Your browser does not support notifications.");
+      return;
+    }
+
+    try {
+      const permission = await Notification.requestPermission();
+
+      setNotificationPermission(permission);
+
+      if (permission === "granted") {
+        new Notification("FriendChat", {
+          body: "Notifications are enabled!",
+        });
+      }
+    } catch (error) {
+      console.error("Notification permission error:", error);
+    }
+  }
+
+  // -----------------------------
+  // CHECK NOTIFICATION PERMISSION
+  // -----------------------------
+  useEffect(() => {
+    if ("Notification" in window) {
+      setNotificationPermission(Notification.permission);
+    }
+  }, []);
 
   // -----------------------------
   // SAVE USERNAME
@@ -114,7 +150,6 @@ export default function Chat({ user }) {
     const messageList = data || [];
     setMessages(messageList);
 
-    // Get unique user IDs
     const userIds = [
       ...new Set(messageList.map((m) => m.user_id)),
     ];
@@ -169,16 +204,53 @@ export default function Chat({ user }) {
           table: "messages",
           filter: "group_id=eq." + active.id,
         },
-        () => {
-          loadMessages(active.id);
+        async (payload) => {
+          await loadMessages(active.id);
+
+          // Apne message ki notification nahi
+          if (payload.new.user_id === user.id) {
+            return;
+          }
+
+          // Notification sirf tab jab page background me ho
+          if (
+            typeof window !== "undefined" &&
+            "Notification" in window &&
+            Notification.permission === "granted" &&
+            document.visibilityState !== "visible"
+          ) {
+            let senderName = "New message";
+
+            const { data: senderProfile } = await s
+              .from("profiles")
+              .select("username")
+              .eq("id", payload.new.user_id)
+              .maybeSingle();
+
+            if (senderProfile?.username) {
+              senderName = senderProfile.username;
+            }
+
+            const notification = new Notification(senderName, {
+              body: payload.new.content || "New message",
+              tag: "friendchat-" + active.id,
+            });
+
+            notification.onclick = () => {
+              window.focus();
+              notification.close();
+            };
+          }
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log("Realtime status:", status);
+      });
 
     return () => {
       s.removeChannel(channel);
     };
-  }, [active]);
+  }, [active, user.id]);
 
   // -----------------------------
   // SEND MESSAGE
@@ -312,6 +384,28 @@ export default function Chat({ user }) {
             <p className="small">
               Chat name: <b>{username}</b>
             </p>
+          )}
+
+          {/* NOTIFICATIONS */}
+          <h3>🔔 Notifications</h3>
+
+          {notificationPermission === "granted" ? (
+            <p className="small">
+              ✅ Notifications enabled
+            </p>
+          ) : notificationPermission === "denied" ? (
+            <p className="small">
+              ❌ Notifications blocked.
+              <br />
+              Browser settings se notifications allow karein.
+            </p>
+          ) : (
+            <button
+              type="button"
+              onClick={enableNotifications}
+            >
+              🔔 Enable Notifications
+            </button>
           )}
 
           {/* CREATE GROUP */}
